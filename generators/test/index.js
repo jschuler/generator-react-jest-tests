@@ -25,14 +25,30 @@ const _extends = Object.assign || function (target) {
 
 const filenameFromPath = filePath => {
   log('filenameFromPath ', filePath);
-  const filePathNoExtension = filePath.split('.js');
+  const filePathNoExtension = filePath.split('.tsx');
   const filePathNoExtensionArray = filePathNoExtension[0].split('/');
   const filename = filePathNoExtensionArray[filePathNoExtensionArray.length - 1];
   return filename;
 };
 
-const generateFakeProp = ({propName, name, value, raw}) => {
-  log('generateFakeProp ', {propName, name, value, raw});
+const getFirstLiteralFromElements = (elements) => {
+  let firstLiteral = 'string';
+  if (elements) {
+    for (let i = 0; i < elements.length; i++) {
+      if (elements[i].name === 'literal') {
+        firstLiteral = elements[i].value;
+        break;
+      } else if (elements[i].name === 'ReactElementType') {
+        firstLiteral = '() => <p>ReactElementType</p>';
+        break;
+      }
+    }
+  } 
+  return firstLiteral;
+}
+
+const generateFakeProp = ({propName, name, value, raw, elements, signature}) => {
+  log('generateFakeProp ', {propName, name, value, raw, elements});
   const isShape = typeof (value) === 'object';
   if (isShape) {
     const fakeShape = {};
@@ -49,22 +65,31 @@ const generateFakeProp = ({propName, name, value, raw}) => {
       return {name, value: 42};
     case 'string':
       return {name, value: "'defaultString'"};
-    case 'bool':
+    case 'boolean':
       return {name, value: true};
     case 'array':
       return {name, value: []};
     default:
       switch (name) {
+        case 'signature':
+          return {name, value: raw || '() => {}'};
         case 'func':
           return {name, value: '() => {}'};
         case 'number':
           return {name, value: 42};
         case 'string':
           return {name, value: "'defaultString'"};
-        case 'bool':
+        case 'boolean':
           return {name, value: true};
         case 'array':
           return {name, value: []};
+        case 'union':
+          const firstLiteral = getFirstLiteralFromElements(elements);
+          return {name, value: `'${firstLiteral}'`};
+        case 'ReactReactElement':
+          return {name, value: '<p>React Element</p>'};
+        case 'ReactReactNode':
+          return {name, value: "'defaultString'"};
         default:
           switch (raw) {
             case 'PropTypes.func':
@@ -91,7 +116,8 @@ const extractDefaultProps = (filePath, currentFilePath) => {
   const filename = filenameFromPath(filePath); // filePathNoExtensionArray[filePathNoExtensionArray.length - 1];
   const fileString = fs.readFileSync(filePath, 'utf8');
   try {
-    var componentInfo = reactDocs.parse(fileString);
+    // console.log(JSON.stringify(fileString));
+    var componentInfo = reactDocs.parse(fileString, null, null, { filename: filePath });
   } catch (err) {
     console.log(filePath, 'is not a React Component, ');
     throw new Error(err);
@@ -103,12 +129,18 @@ const extractDefaultProps = (filePath, currentFilePath) => {
     return {filePath, componentProps, filename, currentFilePath};
   }
 
+  console.log(JSON.stringify(componentInfo.props));
   const propNames = Object.keys(componentInfo.props);
   for (let i = 0; i < propNames.length; i += 1) {
     const propName = propNames[i];
+    if (propName.indexOf('ouia') > -1) {
+      // TODO, allow list of ignored props
+      continue;
+    }
     let propType;
-    if (componentInfo.props[propName].type) {
-      propType = componentInfo.props[propName].type.name;
+    if (componentInfo.props[propName].tsType) {
+      // union | boolean | ReactReactNode | string
+      propType = componentInfo.props[propName].tsType.name;
     } else {
       error('propType not set for ' + propName + ' in ' + filename + ' at ' + currentFilePath + ' consider setting it in propTypes');
       propType = 'string';
@@ -118,15 +150,21 @@ const extractDefaultProps = (filePath, currentFilePath) => {
     if (hasDefaultvalue) {
       //eslint-disable-next-line
       error(componentInfo.props[propName].defaultValue);
-      propDefaultValue = componentInfo.props[propName].defaultValue.value; // ? componentInfo.props[currentProp] : '-1';
+      if (componentInfo.props[propName].defaultValue.computed) {
+        // value is a string containing the enum, e.g. 'AlertVariant.info'
+        // instead grab the first enum value from the raw key
+        propDefaultValue = getFirstLiteralFromElements(componentInfo.props[propName].tsType.elements);
+      } else {
+        propDefaultValue = componentInfo.props[propName].defaultValue.value; // ? componentInfo.props[currentProp] : '-1';
+      }
       error({propName, propType, propDefaultValue});
     } else {
       error('defaultProps value not set for ' + propName + ' in ' + filename + ' at ' + currentFilePath + ' consider setting it  in defaultProps');
       error('!!! Will try to generate fake data this might cause unexpected results !!!');
-      const {type, required, description} = componentInfo.props[propName];
-      const {name, value, raw} = type;
+      const {tsType, required, description} = componentInfo.props[propName];
+      const {name, value, raw, elements, signature} = tsType;
       if (required) {
-        const fakeProp = generateFakeProp({propName, name, value, raw});
+        const fakeProp = generateFakeProp({propName, name, value, raw, elements, signature});
         propDefaultValue = fakeProp.value;
         log('Generated ', fakeProp, 'returning it as ', {propName, propType, propDefaultValue, currentFilePath});
       }
@@ -165,21 +203,24 @@ module.exports = class extends Generator {
         type: 'input',
         name: 'COMPONENTS_PATH',
         message: 'Give me the path to components please !',
-        default: './src/components/'
+        default: './src/components/Dropdown'
       }
     ];
     if (this.options.isNested) {
       this.props = this.options.props;
     } else {
       return this.prompt(prompts).then(function (props) {
+        if (props.COMPONENTS_PATH.slice(-1) !== '/') {
+          props.COMPONENTS_PATH = `${props.COMPONENTS_PATH}/`;
+        }
         this.props = props;
       }.bind(this));
     }
   }
   writing() {
-    const filePaths = read(this.props.COMPONENTS_PATH).filter(filename => filename.endsWith('.js'));
+    const filePaths = read(this.props.COMPONENTS_PATH).filter(filename => filename.endsWith('.tsx') && filename.indexOf('.test.') < 0);
     if (filePaths.length === 0) {
-      const noJsMessage = 'Did not find any .js files';
+      const noJsMessage = 'Did not find any .tsx files';
       console.log(noJsMessage);
       error(noJsMessage);
     }
@@ -198,7 +239,7 @@ module.exports = class extends Generator {
     }
     for (let i = 0; i < metadata.length; i += 1) {
       const compMetaData = metadata[i];
-      const testPath = path.resolve(compMetaData.filePath, path.join('..', '__tests__', compMetaData.filename + '.test.js'));
+      const testPath = path.resolve(compMetaData.filePath, path.join('..', '__tests__', compMetaData.filename + '.test.tsx'));
       const templatePath = this.options.template.length ? path.join(this.sourceRoot('.'), this.options.template) : 'index.template.js';
       this.fs.copyTpl(
         this.templatePath(templatePath),
