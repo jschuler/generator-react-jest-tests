@@ -1,41 +1,39 @@
-// Auto-generated do not edit
-
 import * as React from 'react';
-import { mount } from 'enzyme';
-import { <%- filename %> } from '<%-relativeFilePath%>';
+import { shallow } from 'enzyme';
+import { <%- pascalFilename %> } from '<%-relativeFilePath%>';
+// any missing imports can usually be resolved by adding them here
+import {  } from '..';
 
-describe('<%-filename%> test', () => {
-  it('<%- filename %> should match snapshot', () => {
-    const view = mount(
-      <<%- filename%>
-        <%- componentProps.map(componentMeta => {
-          return ""+componentMeta.propName+"={"+
-            // (
-            //   (componentMeta.propType === 'string')
-            //     ?
-            //   "'"
-            //     :
-            //   ''
-            // )
-            //   +
-            (
-              (componentMeta.propType === 'shape' || componentMeta.propType === 'string') ?
-                JSON.stringify(componentMeta.propDefaultValue,null,1)
-                :
-                componentMeta.propDefaultValue
-            )
-            //   +
-            // (
-            //   (componentMeta.propType === 'string')
-            //     ?
-            //   "'"
-            //     :
-            //   ''
-            // )
-              +
-            "}"
-        }  ).join('\n\t\t\t\t') %>
-      />);
-    expect(view).toMatchSnapshot();
-  });
+it('<%- pascalFilename %> should match snapshot (auto-generated)', () => {
+  const view = shallow(
+    <<%- pascalFilename%>
+      <%- componentProps.map(componentMeta => {
+        return ""+componentMeta.propName+"={"+
+          // (
+          //   (componentMeta.propType === 'string')
+          //     ?
+          //   "'"
+          //     :
+          //   ''
+          // )
+          //   +
+          (
+            (componentMeta.propType === 'shape' || componentMeta.propType === 'string') ?
+              JSON.stringify(componentMeta.propDefaultValue,null,1)
+              :
+              componentMeta.propDefaultValue
+          )
+          //   +
+          // (
+          //   (componentMeta.propType === 'string')
+          //     ?
+          //   "'"
+          //     :
+          //   ''
+          // )
+            +
+          "}"
+      }  ).join('\n\t\t\t') %>
+    />);
+  expect(view).toMatchSnapshot();
 });
