@@ -1,6 +1,6 @@
 {
-  "name": "generator-react-jest-tests-ts",
-  "version": "0.3.1",
+  "name": "pf-generator",
+  "version": "0.1.0",
   "description": "react jest tests generator",
   "homepage": "https://www.github.com/rakannimer/generator-react-jest-tests",
   "author": {

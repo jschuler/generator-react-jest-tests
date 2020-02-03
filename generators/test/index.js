@@ -1,12 +1,11 @@
 'use strict';
-var yeoman = require('yeoman-generator');
+var Generator = require('yeoman-generator');
 var yosay = require('yosay');
 var fs = require('fs');
 var path = require('path');
 var read = require('fs-readdir-recursive');
 var reactDocs = require('react-docgen');
 var debug = require('debug');
-var optionOrPrompt = require('yeoman-option-or-prompt');
 const prettier = require('prettier');
 const pascalcase = require('pascalcase');
 
@@ -251,30 +250,67 @@ const extractDefaultProps = (filePath, currentFilePath) => {
   return {filePath, componentProps, componentInfo, filename, currentFilePath};
 };
 
-module.exports = yeoman.generators.Base.extend({
- 
-  _optionOrPrompt: optionOrPrompt,
- 
-  prompting: function() {
-    var done = this.async();
-    // Instead of calling prompt, call _optionOrPrompt to allow parameters to be passed as command line or composeWith options.
-    this._optionOrPrompt([{
-      type    : 'input',
-      name    : 'COMPONENTS_PATH',
-      message : 'Folder that contains .tsx files',
-      store   : true
-    }], function (answers) {
-      this.log(answers.COMPONENTS_PATH);
-      if (answers.COMPONENTS_PATH.slice(-1) !== '/') {
-        answers.COMPONENTS_PATH = `${answers.COMPONENTS_PATH}/`;
-        this.props = answers;
+module.exports = class extends Generator {
+  constructor(args, opts) {
+    super(args, opts);
+    this.option('template', {
+      desc: 'Custom template to use for tests',
+      alias: 't',
+      type: String,
+      default: '',
+      hide: false
+    });
+    this.option('path', {
+      desc: 'Folder that contains .tsx files',
+      alias: 'p',
+      type: String,
+      default: '',
+      hide: false
+    });
+    this.option('make-snippets', {
+      desc: 'Create snippets file instead of test files',
+      alias: 's',
+      type: Boolean,
+      default: false,
+      hide: false
+    });
+  }
+  prompting() {
+    if (this.options.template.length) {
+      this.log(`Received custom template of: ${this.options.template}`);
+    }
+    this.log(yosay('Let\'s create tests'));
+    var prompts = [
+      {
+        type: 'input',
+        name: 'COMPONENTS_PATH',
+        message: 'Folder that contains .tsx files',
+        store: true
+      },
+      {
+        type: 'confirm',
+        name: 'MAKE_SNIPPETS',
+        message: 'Create snippets instead of tests?',
+        default: 'n'
       }
-      done();
+    ];
+    if (this.options.path) {
+      if (this.options.path.slice(-1) !== '/') {
+        this.options.path = `${this.options.path}/`;
+      }
+    } else {
+      return this.prompt(prompts).then(function (props) {
+      if (props.COMPONENTS_PATH.slice(-1) !== '/') {
+        props.COMPONENTS_PATH = `${props.COMPONENTS_PATH}/`;
+      }
+      this.props = props;
     }.bind(this));
-  },
-
-  writing: function() {
-    const filePaths = read(this.props.COMPONENTS_PATH).filter(filename => filename.endsWith('.tsx') && filename.indexOf('.test.') < 0);
+    }
+  }
+  writing() {
+    const chosenPath = this.options.path || (this.props && this.props.COMPONENTS_PATH);
+    const makeSnippets = this.options['make-snippets'] || (this.props && this.props.MAKE_SNIPPETS);
+    const filePaths = read(chosenPath).filter(filename => filename.endsWith('.tsx') && filename.indexOf('.test.') < 0);
     if (filePaths.length === 0) {
       const noJsMessage = 'Did not find any .tsx files';
       console.log(noJsMessage);
@@ -283,7 +319,7 @@ module.exports = yeoman.generators.Base.extend({
     const metadata = [];
     for (let i = 0; i < filePaths.length; i += 1) {
       const currentFilePath = filePaths[i];
-      const completeFilePath = this.props.COMPONENTS_PATH + currentFilePath;
+      const completeFilePath = chosenPath + currentFilePath;
       try {
         const componentInfo = extractDefaultProps(completeFilePath, currentFilePath);
         metadata.push(componentInfo);
@@ -292,61 +328,58 @@ module.exports = yeoman.generators.Base.extend({
         error(err);
       }
     }
-    let jsonSnippets = {};
-    let snippetsString = '{\n';
-    for (let i = 0; i < metadata.length; i += 1) {
-      const compMetaData = metadata[i];
-      const pascalFilename = pascalcase(compMetaData.filename);
-      const getDefaultValue = (componentMeta) => (
-        (componentMeta.propType === 'shape' || componentMeta.propType === 'string') ?
-          JSON.stringify(componentMeta.propDefaultValue,null,1)
-          :
-          componentMeta.propDefaultValue
-      );
-      const body = compMetaData.componentProps.map(componentMeta => {
-        return `\\t${componentMeta.propName}={${getDefaultValue(componentMeta)}}/* ${componentMeta.required ? 'required: ' : 'optional: '}${componentMeta.description} */`
-      });
-      const snippetBody = `<${pascalFilename}
+    console.log(`value of makeSnippets: ${makeSnippets}`)
+    if (makeSnippets) {
+      let jsonSnippets = {};
+      let snippetsString = '{\n';
+      for (let i = 0; i < metadata.length; i += 1) {
+        const compMetaData = metadata[i];
+        const pascalFilename = pascalcase(compMetaData.filename);
+        const getDefaultValue = (componentMeta) => (
+          (componentMeta.propType === 'shape' || componentMeta.propType === 'string') ?
+            JSON.stringify(componentMeta.propDefaultValue,null,1)
+            :
+            componentMeta.propDefaultValue
+        );
+        const body = compMetaData.componentProps.map(componentMeta => {
+          return `\\t${componentMeta.propName}={${getDefaultValue(componentMeta)}}/* ${componentMeta.required ? 'required: ' : 'optional: '}${componentMeta.description} */`
+        });
+        const snippetBody = `<${pascalFilename}
 ${body.join('\n')}
 />`;
-      const snippet = renderSnippet(snippetBody, `!${pascalFilename}`, `${pascalFilename}`);
-      jsonSnippets[pascalFilename] = snippet;
-      console.log(snippet);
+        const snippet = renderSnippet(snippetBody, `!${pascalFilename}`, `${pascalFilename}`);
+        jsonSnippets[pascalFilename] = snippet;
+        // console.log(snippet);
+        
+        snippetsString = `${snippetsString}\n\t"${pascalFilename}": ${snippet},`;
+      };
+      snippetsString = `${snippetsString}\n}`;
       
-      snippetsString = `${snippetsString}\n\t"${pascalFilename}": ${snippet},`;
-    };
-    snippetsString = `${snippetsString}\n}`;
-    
-    fs.writeFileSync('snippets.json', snippetsString, 'utf-8');
-    // fs.writeFile('snippets.json', jsonSnippets, (err) => {
-    //   // throws an error, you could also catch it here
-    //   if (err) throw err;
-  
-    //   // success case, the file was saved
-    //   console.log('snippets saved!');
-    // })
-    // for (let i = 0; i < metadata.length; i += 1) {
-    //   const compMetaData = metadata[i];
-    //   const testPath = path.resolve(compMetaData.filePath, path.join('..', '__tests__', compMetaData.filename + '.test.tsx'));
-    //   const templatePath = this.options.template.length ? path.join(this.sourceRoot('.'), this.options.template) : 'index.template.js';
-    //   this.fs.copyTpl(
-    //     this.templatePath(templatePath),
-    //     this.destinationPath(testPath),
-    //     _extends({}, compMetaData, {
-    //       relativeFilePath: path.join('..', compMetaData.filename),
-    //       pascalFilename: pascalcase(compMetaData.filename)
-    //     })
-    //   );
-    //   try {
-    //     const generatedTestCode = this.fs.read(testPath);
-    //     const formattedTestCode = this.options.prettify ? prettier.format(generatedTestCode, {
-    //       singleQuote: true,
-    //       trailingComma: 'all'
-    //     }) : generatedTestCode;
-    //     this.fs.write(testPath, formattedTestCode);
-    //   } catch (err) {
-    //     error('Couldnt lint generated code :( from ' + compMetaData);
-    //   }
-    // }
+      fs.writeFileSync(path.join(chosenPath, 'snippets.json'), snippetsString, 'utf-8');
+    } else {
+      for (let i = 0; i < metadata.length; i += 1) {
+        const compMetaData = metadata[i];
+        const testPath = path.resolve(compMetaData.filePath, path.join('..', '__tests__', compMetaData.filename + '.test.tsx'));
+        const templatePath = this.options.template.length ? path.join(this.sourceRoot('.'), this.options.template) : 'index.template.js';
+        this.fs.copyTpl(
+          this.templatePath(templatePath),
+          this.destinationPath(testPath),
+          _extends({}, compMetaData, {
+            relativeFilePath: path.join('..', compMetaData.filename),
+            pascalFilename: pascalcase(compMetaData.filename)
+          })
+        );
+        try {
+          const generatedTestCode = this.fs.read(testPath);
+          const formattedTestCode = this.options.prettify ? prettier.format(generatedTestCode, {
+            singleQuote: true,
+            trailingComma: 'all'
+          }) : generatedTestCode;
+          this.fs.write(testPath, formattedTestCode);
+        } catch (err) {
+          error('Couldnt lint generated code :( from ' + compMetaData);
+        }
+      }
+    }
   }
-});
+};
