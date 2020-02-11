@@ -76,6 +76,9 @@ const getFirstLiteralFromElements = (elements, required) => {
       } else if (elements[i].name === 'boolean') {
         firstLiteral = 'true';
         break;
+      } else if (elements[i].name === 'string') {
+        firstLiteral = "'string'";
+        break;
       } else if (elements[i].name === 'Function') {
         firstLiteral = '() => {}';
         break;
@@ -172,7 +175,7 @@ const generateFakeProp = ({propName, name, value, raw, elements, signature, requ
 };
 
 const extractDefaultProps = (filePath, currentFilePath) => {
-  // log('extractDefaultProps ', {filePath, currentFilePath});
+  log('extractDefaultProps ', {filePath, currentFilePath});
   const filename = filenameFromPath(filePath); // filePathNoExtensionArray[filePathNoExtensionArray.length - 1];
   const fileString = fs.readFileSync(filePath, 'utf8');
   try {
@@ -241,7 +244,7 @@ const extractDefaultProps = (filePath, currentFilePath) => {
       // log({propName, propType, propDefaultValue});
     } else {
       // log('defaultProps value not set for ' + propName + ' in ' + filename + ' at ' + currentFilePath + ' consider setting it  in defaultProps');
-      fakeProp = generateFakeProp({propName, name, value, raw, elements, signature});
+      fakeProp = generateFakeProp({propName, name, value, raw, elements, signature, required});
       propDefaultValue = fakeProp.value;
       // log('Generated ', fakeProp, 'returning it as ', {propName, propType, propDefaultValue, currentFilePath});
     }
@@ -267,13 +270,139 @@ module.exports = class extends Generator {
       default: '',
       hide: false
     });
+    this.option('make-tests', {
+      desc: 'Generates jest tests',
+      alias: 't',
+      type: Boolean,
+      default: false,
+      hide: false
+    });
     this.option('make-snippets', {
-      desc: 'Create snippets file instead of test files',
+      desc: 'Generate snippets',
       alias: 's',
       type: Boolean,
       default: false,
       hide: false
     });
+    this.option('make-fragments', {
+      desc: 'Generates fragments',
+      alias: 'f',
+      type: Boolean,
+      default: false,
+      hide: false
+    });
+    this.option('append-version', {
+      desc: 'Create snippets file instead of test files',
+      alias: 'v',
+      type: String,
+      default: '',
+      hide: false
+    });
+    this.makeCodeFragments = (metadata, flatStructure, chosenPath, withComments, version) => {
+      let jsonSnippet = {
+        codeCategories: []
+      }
+      const getCategoryJson = (category) => {
+        return {
+          category,
+          codeFragments: []
+        };
+      };
+      const getFragmentJson = (label, content) => {
+        return {
+          label,
+          content
+        };
+      }
+      const componentsCategory = getCategoryJson('Components');
+      const layoutsCategory = getCategoryJson('Layouts');
+      const betaCategory = getCategoryJson('Beta');
+      const getCategory = filePath => {
+        console.log(`filePath: ${filePath}`);
+        let groupArr;
+        let group;
+        let fragment;
+        let category;
+        let matcher;
+        if (filePath.indexOf('/experimental/') > -1) {
+          matcher = /\/experimental\/(.*?)\//;
+          category = betaCategory;
+        } else if (filePath.indexOf('/beta/') > -1) {
+          matcher = /\/beta\/(.*?)\//;
+          category = betaCategory;
+        } else if (filePath.indexOf('/components/') > -1) {
+          matcher = /\/components\/(.*?)\//;
+          category = componentsCategory;
+        } else if (filePath.indexOf('/layouts/') > -1) {
+          matcher = /\/layouts\/(.*?)\//;
+          category = layoutsCategory;
+        } else {
+          matcher = /\/components\/(.*?)\//;
+          category = componentsCategory;
+        }
+        // console.log(`category: ${JSON.stringify(category)}`)
+        groupArr = filePath.match(matcher);
+        group = (groupArr && groupArr[1]) || 'Unknown';
+        fragment = category.codeFragments.find(fragment => fragment.group === group);
+        if (!fragment) {
+          fragment = {
+            group,
+            children: []
+          };
+          category.codeFragments.push(fragment);
+        }
+        // console.log(`fragment: ${JSON.stringify(fragment)}`)
+        // console.log(`returning ${category.codeFragments[category.codeFragments.length - 1].group}`)
+        return fragment.children;
+      }
+      for (let i = 0; i < metadata.length; i += 1) {
+        const compMetaData = metadata[i];
+        const pascalFilename = pascalcase(compMetaData.filename);
+        const currentCategoryGroup = getCategory(compMetaData.filePath);
+        const getDefaultValue = (componentMeta) => (
+          (componentMeta.propType === 'shape' || componentMeta.propType === 'string') ?
+            JSON.stringify(componentMeta.propDefaultValue,null,1)
+            :
+            componentMeta.propDefaultValue
+        );
+        let hasChildren;
+        let placeholderIndex = 1;
+        const body = compMetaData.componentProps.filter(componentMeta => {
+          if (componentMeta.propName === 'children') {
+            if (withComments) {
+              hasChildren = `\t{\${0:${getDefaultValue(componentMeta)}}/* ${componentMeta.required ? 'required: ' : 'optional: '}${componentMeta.description.replace(/(\n)+/g, ' | ')} */}`;
+              return false;
+            } else {
+              hasChildren = `\t{\${0:${getDefaultValue(componentMeta)}}}`;
+              return false;
+            }
+          }
+          return true;
+        }).map(componentMeta => {
+          if (withComments) {
+            return `\t${componentMeta.propName}={\${${placeholderIndex++}:${getDefaultValue(componentMeta)}}/* ${componentMeta.required ? 'required: ' : 'optional: '}${componentMeta.description.replace(/(\n)+/g, ' | ')} */}`
+          } else {
+            return `\t${componentMeta.propName}={\${${placeholderIndex++}:${getDefaultValue(componentMeta)}}}`
+          }
+        });
+
+        let snippetBody;
+        if (hasChildren) {
+          snippetBody = `<${pascalFilename}\n${body.join('\n')}\n>\n${hasChildren}\n</${pascalFilename}>`;
+        } else {
+          snippetBody = `<${pascalFilename}\n${body.join('\n')}\n/>`;
+        }
+        currentCategoryGroup.push(getFragmentJson(pascalFilename, snippetBody));
+      };
+      jsonSnippet.codeCategories.push(componentsCategory, layoutsCategory, betaCategory);
+      if (flatStructure) {
+        fs.writeFileSync(path.join(chosenPath, withComments ? `codeFragmentsWithComments${version && `_${version}`}.json` : `codeFragmentsNoComments${version && `_${version}`}.json`), JSON.stringify({
+          codeFragments: componentsCategory.codeFragments.concat(layoutsCategory.codeFragments).concat(betaCategory.codeFragments)
+        }), 'utf-8');
+      } else {
+        fs.writeFileSync(path.join(chosenPath, withComments ? `codeFragmentsWithComments${version && `_${version}`}.json` : `codeFragmentsNoComments${version && `_${version}`}.json`), JSON.stringify(jsonSnippet), 'utf-8');
+      }
+    }
   }
   prompting() {
     if (this.options.template.length) {
@@ -289,10 +418,28 @@ module.exports = class extends Generator {
       },
       {
         type: 'confirm',
-        name: 'MAKE_SNIPPETS',
-        message: 'Create snippets instead of tests?',
+        name: 'MAKE_TESTS',
+        message: 'Generate tests?',
         default: 'n'
-      }
+      },
+      {
+        type: 'confirm',
+        name: 'MAKE_SNIPPETS',
+        message: 'Generate snippets?',
+        default: 'n'
+      },
+      {
+        type: 'confirm',
+        name: 'MAKE_FRAGMENTS',
+        message: 'Generate fragments?',
+        default: 'n'
+      },
+      {
+        type: 'input',
+        name: 'APPEND_VERSION',
+        message: 'Append a version number?',
+        store: true
+      },
     ];
     if (this.options.path) {
       if (this.options.path.slice(-1) !== '/') {
@@ -309,7 +456,11 @@ module.exports = class extends Generator {
   }
   writing() {
     const chosenPath = this.options.path || (this.props && this.props.COMPONENTS_PATH);
+    const version = this.options['append-version'] || (this.props && this.props.APPEND_VERSION);
+    const makeTests = this.options['make-tests'] || (this.props && this.props.MAKE_TESTS);
     const makeSnippets = this.options['make-snippets'] || (this.props && this.props.MAKE_SNIPPETS);
+    const makeCodeFragments = this.options['make-fragments'] || (this.props && this.props.MAKE_FRAGMENTS);
+    const flatStructure = false;
     const filePaths = read(chosenPath).filter(filename => filename.endsWith('.tsx') && filename.indexOf('.test.') < 0);
     if (filePaths.length === 0) {
       const noJsMessage = 'Did not find any .tsx files';
@@ -320,6 +471,7 @@ module.exports = class extends Generator {
     for (let i = 0; i < filePaths.length; i += 1) {
       const currentFilePath = filePaths[i];
       const completeFilePath = chosenPath + currentFilePath;
+      // console.log(completeFilePath);
       try {
         const componentInfo = extractDefaultProps(completeFilePath, currentFilePath);
         metadata.push(componentInfo);
@@ -328,9 +480,11 @@ module.exports = class extends Generator {
         error(err);
       }
     }
-    console.log(`value of makeSnippets: ${makeSnippets}`)
+    if (makeCodeFragments) {
+      this.makeCodeFragments(metadata, flatStructure, chosenPath, true, version);
+      this.makeCodeFragments(metadata, flatStructure, chosenPath, false, version);
+    }
     if (makeSnippets) {
-      let jsonSnippets = {};
       let snippetsString = '{\n';
       for (let i = 0; i < metadata.length; i += 1) {
         const compMetaData = metadata[i];
@@ -341,31 +495,72 @@ module.exports = class extends Generator {
             :
             componentMeta.propDefaultValue
         );
-        const body = compMetaData.componentProps.map(componentMeta => {
-          return `\\t${componentMeta.propName}={${getDefaultValue(componentMeta)}}/* ${componentMeta.required ? 'required: ' : 'optional: '}${componentMeta.description} */`
+        let hasChildren;
+        let hasChildrenNoComment;
+        let placeholderIndex = 1;
+        const body = compMetaData.componentProps.filter(componentMeta => {
+          if (componentMeta.propName === 'children') {
+            // hasChildren = `\\t{${getDefaultValue(componentMeta)}/* ${componentMeta.required ? 'required: ' : 'optional: '}${componentMeta.description.replace(/(\n)+/g, ' | ')} */}`;
+            hasChildren = `\\t{\${0:${getDefaultValue(componentMeta)}}/* ${componentMeta.required ? 'required: ' : 'optional: '}${componentMeta.description.replace(/(\n)+/g, ' | ')} */}`;
+            return false;
+          }
+          return true;
+        }).map(componentMeta => {
+          return `\\t${componentMeta.propName}={\${${placeholderIndex++}:${getDefaultValue(componentMeta)}}/* ${componentMeta.required ? 'required: ' : 'optional: '}${componentMeta.description.replace(/(\n)+/g, ' | ')} */}`
         });
-        const snippetBody = `<${pascalFilename}
+
+        placeholderIndex = 1;
+        const bodyNoComments = compMetaData.componentProps.filter(componentMeta => {
+          if (componentMeta.propName === 'children') {
+            hasChildrenNoComment = `\\t{\${0:${getDefaultValue(componentMeta)}}}`;
+            return false;
+          }
+          return true;
+        }).map(componentMeta => {
+          return `\\t${componentMeta.propName}={\${${placeholderIndex++}:${getDefaultValue(componentMeta)}}}`
+        });
+        
+        let snippetBody;
+        let snippetBodyNoComments;
+        if (hasChildren || hasChildrenNoComment) {
+snippetBody = `<${pascalFilename}
+${body.join('\n')}
+>
+${hasChildren}
+</${pascalFilename}>`;
+
+snippetBodyNoComments = `<${pascalFilename}
+${bodyNoComments.join('\n')}
+>
+${hasChildrenNoComment}
+</${pascalFilename}>`;
+        } else {
+snippetBody = `<${pascalFilename}
 ${body.join('\n')}
 />`;
-        const snippet = renderSnippet(snippetBody, `!${pascalFilename}`, `${pascalFilename}`);
-        jsonSnippets[pascalFilename] = snippet;
-        // console.log(snippet);
-        
-        snippetsString = `${snippetsString}\n\t"${pascalFilename}": ${snippet},`;
+
+snippetBodyNoComments = `<${pascalFilename}
+${bodyNoComments.join('\n')}
+/>`;
+        }
+        const snippet = renderSnippet(snippetBody, `#${pascalFilename}`, `${pascalFilename}`);
+        const snippetNoComments = renderSnippet(snippetBodyNoComments, `!${pascalFilename}`, `${pascalFilename}`);
+        snippetsString = `${snippetsString}\n\t"${pascalFilename}": ${snippet},\n\t"${pascalFilename}NoComments": ${snippetNoComments},`;
       };
       snippetsString = `${snippetsString}\n}`;
       
-      fs.writeFileSync(path.join(chosenPath, 'snippets.json'), snippetsString, 'utf-8');
-    } else {
+      fs.writeFileSync(path.join(chosenPath, `snippets${version && `_${version}`}.json`), snippetsString, 'utf-8');
+    }
+    if (makeTests) {
       for (let i = 0; i < metadata.length; i += 1) {
         const compMetaData = metadata[i];
-        const testPath = path.resolve(compMetaData.filePath, path.join('..', '__tests__', compMetaData.filename + '.test.tsx'));
+        const testPath = path.resolve(compMetaData.filePath, path.join('..', '__tests__/Generated', compMetaData.filename + '.test.tsx'));
         const templatePath = this.options.template.length ? path.join(this.sourceRoot('.'), this.options.template) : 'index.template.js';
         this.fs.copyTpl(
           this.templatePath(templatePath),
           this.destinationPath(testPath),
           _extends({}, compMetaData, {
-            relativeFilePath: path.join('..', compMetaData.filename),
+            relativeFilePath: path.join('../..', compMetaData.filename),
             pascalFilename: pascalcase(compMetaData.filename)
           })
         );
