@@ -325,19 +325,19 @@ module.exports = class extends Generator {
         let category;
         let matcher;
         if (filePath.indexOf('/experimental/') > -1) {
-          matcher = /\/experimental\/(.*?)\//;
+          matcher = /\/src\/experimental\/.*\/(.*?)\//;
           category = betaCategory;
         } else if (filePath.indexOf('/beta/') > -1) {
-          matcher = /\/beta\/(.*?)\//;
+          matcher = /\/src\/beta\/(.*?)\//;
           category = betaCategory;
         } else if (filePath.indexOf('/components/') > -1) {
-          matcher = /\/components\/(.*?)\//;
+          matcher = /\/src\/components\/(.*?)\//;
           category = componentsCategory;
         } else if (filePath.indexOf('/layouts/') > -1) {
-          matcher = /\/layouts\/(.*?)\//;
+          matcher = /\/src\/layouts\/(.*?)\//;
           category = layoutsCategory;
         } else {
-          matcher = /\/components\/(.*?)\//;
+          matcher = /\/src\/components\/(.*?)\//;
           category = componentsCategory;
         }
         // console.log(`category: ${JSON.stringify(category)}`)
@@ -402,6 +402,56 @@ module.exports = class extends Generator {
       } else {
         fs.writeFileSync(path.join(chosenPath, withComments ? `codeFragmentsWithComments${version && `_${version}`}.json` : `codeFragmentsNoComments${version && `_${version}`}.json`), JSON.stringify(jsonSnippet), 'utf-8');
       }
+    }
+    this.makeSnippets = (metadata, chosenPath, withComments, version) => {
+      let snippetsString = '{\n';
+      for (let i = 0; i < metadata.length; i += 1) {
+        const compMetaData = metadata[i];
+        const pascalFilename = pascalcase(compMetaData.filename);
+        const getDefaultValue = (componentMeta) => (
+          (componentMeta.propType === 'shape' || componentMeta.propType === 'string') ?
+            JSON.stringify(componentMeta.propDefaultValue,null,1)
+            :
+            componentMeta.propDefaultValue
+        );
+        let hasChildren;
+        let placeholderIndex = 1;
+        const body = compMetaData.componentProps.filter(componentMeta => {
+          if (componentMeta.propName === 'children') {
+            if (withComments) {
+              hasChildren = `\\t{\${0:${getDefaultValue(componentMeta)}}/* ${componentMeta.required ? 'required: ' : 'optional: '}${componentMeta.description.replace(/(\n)+/g, ' | ')} */}`;
+            } else {
+              hasChildren = `\\t{\${0:${getDefaultValue(componentMeta)}}}`;
+            }
+            return false;
+          }
+          return true;
+        }).map(componentMeta => {
+          if (withComments) {
+            return `\\t${componentMeta.propName}={\${${placeholderIndex++}:${getDefaultValue(componentMeta)}}/* ${componentMeta.required ? 'required: ' : 'optional: '}${componentMeta.description.replace(/(\n)+/g, ' | ')} */}`
+          } else {
+            return `\\t${componentMeta.propName}={\${${placeholderIndex++}:${getDefaultValue(componentMeta)}}}`
+          }
+        });
+        
+        let snippetBody;
+        if (hasChildren) {
+snippetBody = `<${pascalFilename}
+${body.join('\n')}
+>
+${hasChildren}
+</${pascalFilename}>`;
+        } else {
+snippetBody = `<${pascalFilename}
+${body.join('\n')}
+/>`;
+        }
+        const snippet = renderSnippet(snippetBody, `${withComments ? '#' : '!'}${pascalFilename}`, `${pascalFilename}`);
+        snippetsString = `${snippetsString}\n\t"${pascalFilename}": ${snippet},`;
+      };
+      snippetsString = `${snippetsString}\n}`;
+      
+      fs.writeFileSync(path.join(chosenPath, withComments ? `snippetsWithComments${version && `_${version}`}.json` : `snippetsNoComments${version && `_${version}`}.json`), snippetsString, 'utf-8');
     }
   }
   prompting() {
@@ -485,71 +535,8 @@ module.exports = class extends Generator {
       this.makeCodeFragments(metadata, flatStructure, chosenPath, false, version);
     }
     if (makeSnippets) {
-      let snippetsString = '{\n';
-      for (let i = 0; i < metadata.length; i += 1) {
-        const compMetaData = metadata[i];
-        const pascalFilename = pascalcase(compMetaData.filename);
-        const getDefaultValue = (componentMeta) => (
-          (componentMeta.propType === 'shape' || componentMeta.propType === 'string') ?
-            JSON.stringify(componentMeta.propDefaultValue,null,1)
-            :
-            componentMeta.propDefaultValue
-        );
-        let hasChildren;
-        let hasChildrenNoComment;
-        let placeholderIndex = 1;
-        const body = compMetaData.componentProps.filter(componentMeta => {
-          if (componentMeta.propName === 'children') {
-            // hasChildren = `\\t{${getDefaultValue(componentMeta)}/* ${componentMeta.required ? 'required: ' : 'optional: '}${componentMeta.description.replace(/(\n)+/g, ' | ')} */}`;
-            hasChildren = `\\t{\${0:${getDefaultValue(componentMeta)}}/* ${componentMeta.required ? 'required: ' : 'optional: '}${componentMeta.description.replace(/(\n)+/g, ' | ')} */}`;
-            return false;
-          }
-          return true;
-        }).map(componentMeta => {
-          return `\\t${componentMeta.propName}={\${${placeholderIndex++}:${getDefaultValue(componentMeta)}}/* ${componentMeta.required ? 'required: ' : 'optional: '}${componentMeta.description.replace(/(\n)+/g, ' | ')} */}`
-        });
-
-        placeholderIndex = 1;
-        const bodyNoComments = compMetaData.componentProps.filter(componentMeta => {
-          if (componentMeta.propName === 'children') {
-            hasChildrenNoComment = `\\t{\${0:${getDefaultValue(componentMeta)}}}`;
-            return false;
-          }
-          return true;
-        }).map(componentMeta => {
-          return `\\t${componentMeta.propName}={\${${placeholderIndex++}:${getDefaultValue(componentMeta)}}}`
-        });
-        
-        let snippetBody;
-        let snippetBodyNoComments;
-        if (hasChildren || hasChildrenNoComment) {
-snippetBody = `<${pascalFilename}
-${body.join('\n')}
->
-${hasChildren}
-</${pascalFilename}>`;
-
-snippetBodyNoComments = `<${pascalFilename}
-${bodyNoComments.join('\n')}
->
-${hasChildrenNoComment}
-</${pascalFilename}>`;
-        } else {
-snippetBody = `<${pascalFilename}
-${body.join('\n')}
-/>`;
-
-snippetBodyNoComments = `<${pascalFilename}
-${bodyNoComments.join('\n')}
-/>`;
-        }
-        const snippet = renderSnippet(snippetBody, `#${pascalFilename}`, `${pascalFilename}`);
-        const snippetNoComments = renderSnippet(snippetBodyNoComments, `!${pascalFilename}`, `${pascalFilename}`);
-        snippetsString = `${snippetsString}\n\t"${pascalFilename}": ${snippet},\n\t"${pascalFilename}NoComments": ${snippetNoComments},`;
-      };
-      snippetsString = `${snippetsString}\n}`;
-      
-      fs.writeFileSync(path.join(chosenPath, `snippets${version && `_${version}`}.json`), snippetsString, 'utf-8');
+      this.makeSnippets(metadata, chosenPath, true, version);
+      this.makeSnippets(metadata, chosenPath, false, version);
     }
     if (makeTests) {
       for (let i = 0; i < metadata.length; i += 1) {
