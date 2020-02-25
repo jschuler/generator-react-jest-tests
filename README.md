@@ -1,105 +1,56 @@
-# React Jest tests yeoman generator
+# TSX docgen yeoman generator
 
 ## What's that ?
 
-This is a [Yeoman](http://yeoman.io) generator used to generate Jest snapshot tests by parsing react components defaultProps and propTypes.
-The tests are linted with [prettier](https://github.com/prettier/prettier) and outputted to the current directory's ```__tests__``` folder.
+This is a [Yeoman](http://yeoman.io) generator that parses `.tsx` component files using `react-docgen` and interprets the props and defaults. Once parsed, it can create either jest snapshot test files (the default choice), or snippet files that can be used in VSCode.
 
-## Why ?
-
-Writing smoke tests for well-defined components can (and should) easily be offloaded to software. This is a solution I use across projects to bootstrap tests.
+Test files are added to a component's directory into a `__tests__/Generated` folder.
 
 
 ## Installation
 
-First, install [Yeoman](http://yeoman.io) and generator-react-jest-tests using [npm](https://www.npmjs.com/) (we assume you have pre-installed [node.js](https://nodejs.org/)).
-
 ```bash
-npm install -g yo
-npm install -g generator-react-jest-tests
+npm install yo generator-tsx-docgen
 ```
 
 
 ## Commands
 
-Suppose you have the following file structure
-```
-- app/
-	- components/
-      - MyComp.js
-      - MaybeSome.css
-      - AndA.png
-	- storesOrUtils/
-      - someFile.js
-```
+Default, generate jest test files:
+`yo tsx-jest`
 
-Silent :
-
-```
-yo react-jest-tests:test
-```
-Verbose :
-
-```
-DEBUG=generator-react-jest-tests* yo react-jest-tests:test
-```
-
-```
-     _-----_
-    |       |
-    |--(o)--|    ╭──────────────────────────╮
-   `---------´   │    Let's create tests    │
-    ( _´U`_ )    ╰──────────────────────────╯
-    /___A___\   /
-     |  ~  |
-   __'.___.'__
- ´   `  |° ´ Y `
-
-? Give me the path to components please ! (./src/components/)
-```
+Provide the path to the folder that contains `.tsx` files. It can be a relative path, such as `./` or `./src`.
 
 Give the path to your folder or ```cd``` to it and put ```./``` as path
 
-Will output :
-```
-create __tests__/MyComp.js
-```
 
-and result in :
+Other options:
+`yo tsx-jest --help`
 
 ```
-- app/
-	- components/
-    - __tests__
-      - MyComp.test.js
-    - MyComp.js
-    - MaybeSome.css
-    - AndA.png
-  - storesOrUtils/
-    - someFile.js
-```
-```
-- app/
-	- components/
-      - __tests__
-          - MyComp.test.js
-      - MyComp.js
-      - MaybeSome.css
-      - AndA.png
-	- storesOrUtils/
-      - someFile.js
-```
+Usage:
+  yo tsx-docgen:app [options]
 
-Run jest to make sure everything is working as expected.
-
-Any error can be resolved by specifying defaultProps, if no defaultProps are passed propTypes will be parsed to try to generate fake data. Fake Data generation from propTypes is a WIP.
-
-To write seamless and predictable tests add defaultProps to your component definitions.
+Options:
+  -h,   --help           # Print the generator's options and usage
+        --skip-cache     # Do not remember prompt answers             Default: false
+        --skip-install   # Do not automatically install dependencies  Default: false
+        --force-install  # Fail on install dependencies error         Default: false
+  -t,   --template       # Custom template to use for tests
+  -p,   --path           # Folder that contains .tsx files
+  -j,   --make-tests     # Generates jest tests                       Default: true
+  -s,   --make-snippets  # Generate snippets                          Default: false
+```
 
 ## Conflicts
 
-By default it won't overwrite anything without asking you first.
-
-## License
-
-MIT © [RakanNimer](https://www.github.com/RakanNimer)
+If a file conflict is detected, you are given the following options:
+```
+Overwrite src/components/Alert/__tests__/Generated/Alert.test.tsx? (ynaxdH) 
+  y) overwrite
+  n) do not overwrite
+  a) overwrite this and all others
+  x) abort
+  d) show the differences between the old and the new
+  h) Help, list all options
+```
